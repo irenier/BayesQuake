@@ -39,24 +39,32 @@ EQdata_name = [os.path.join(EQdata_path, name) for name in os.listdir(EQdata_pat
 EQdata_param = dict(mc=100)
 
 # %% transform data to interval
-EQdata = [
+censor_year = 2022
+EQdata_origin = [
     np.loadtxt(dm, delimiter=",", max_rows=EQdata_param["mc"]) for dm in EQdata_name
 ]
-EQdata = [np.diff(data) for data in EQdata]
+EQdata = [np.diff(data) for data in EQdata_origin]
+EQdata_censor = [censor_year - data[:, -1] for data in EQdata_origin]
 
 
 class EQmodel:
-    def __init__(self, data, dist="Poisson", verbose=True):
-        self.model = pm.Model()
+    def __init__(
+        self,
+        data,
+        data_censor=None,
+        dist="Poisson",
+        censored=False,
+        verbose=True,
+    ):
         self.data = data
+        self.data_censor = data_censor
         self.dist = dist
         self.idata = None
-        self.__init_model__(dist, verbose)
+        self.model = pm.Model()
 
-    def __init_model__(self, dist, verbose):
+        self.__init_model__(dist, censored, verbose)
 
-        if verbose:
-            print("Initializing model using %s distribution!" % dist)
+    def __init_model__(self, dist, censored, verbose):
 
         match dist:
             case "Poisson":
@@ -165,6 +173,19 @@ class EQmodel:
                     "The distribution " + dist + " is not implemented!"
                 )
 
+        if censored:
+            # Add log probability for right censored data
+            # Divide by times of occurrence to correct the log of likelihood
+            pm.Potential(
+                "censor",
+                pt.log1mexp(pm.logcdf(interval, self.data_censor)) / self.data.shape[0],
+                self.model,
+            )
+
+        if verbose:
+            print("Initializing model using %s distribution!" % dist)
+            # pm.model_to_graphviz(self.model).render(dist + "_model")
+
     def sample(self, parameters):
 
         with self.model:
@@ -178,7 +199,12 @@ class EQmodel:
         self.idata.to_netcdf(results_path + self.dist + "-" + name + ".nc")
 
 
-poi_model = EQmodel(EQdata[0].T, "Wald")
+poi_model = EQmodel(
+    data=EQdata[0].T,
+    data_censor=EQdata_censor[0].T,
+    dist="Poisson",
+    censored=True,
+)
 poi_model.sample(MCMC_param["sample"])
 poi_model.sample_posterior_predictive(MCMC_param["sample_posterior_predictive"])
 
