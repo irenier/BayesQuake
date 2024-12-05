@@ -1,52 +1,16 @@
 # %% import packages
 import os
-import numpy as np
-import xarray as xr
-
-# import pandas as pd
-import matplotlib.pyplot as plt
+import arviz as az
 import pymc as pm
 import pytensor.tensor as pt
-import arviz as az
-
-print(f"Running on PyMC v{pm.__version__}")
 
 # %% create directory to save results
 results_path = "results/"
 if not os.path.exists(results_path):
     os.makedirs(results_path)
 
-# %% specify training parameters
-MCMC_param = dict(
-    sample=dict(
-        tune=10000,
-        draws=10000,
-        chains=4,
-        cores=1,
-        random_seed=10001,
-        idata_kwargs={"log_likelihood": True},
-    ),
-    sample_posterior_predictive=dict(
-        extend_inferencedata=True,
-        predictions=True,
-        random_seed=10001,
-    ),
-)
 
-# %% import data
-EQdata_path = "data/chronologies_all_final"
-EQdata_name = [os.path.join(EQdata_path, name) for name in os.listdir(EQdata_path)]
-EQdata_param = dict(mc=100)
-
-# %% transform data to interval
-censor_year = 2022
-EQdata_origin = [
-    np.loadtxt(dm, delimiter=",", max_rows=EQdata_param["mc"]) for dm in EQdata_name
-]
-EQdata = [np.diff(data) for data in EQdata_origin]
-EQdata_censor = [censor_year - data[:, -1] for data in EQdata_origin]
-
-
+# %% define model class
 class EQmodel:
     def __init__(
         self,
@@ -77,7 +41,9 @@ class EQmodel:
                         beta=1 / sigmaZ**2,
                         shape=(self.data.shape[1],),
                     )
-                    interval = pm.Exponential("interval", lam * Z, observed=self.data)
+                    interval = pm.Exponential(
+                        "interval", 1 / (lam * Z), observed=self.data
+                    )
 
             case "Gamma":
                 with self.model:
@@ -98,24 +64,24 @@ class EQmodel:
                         shape=(self.data.shape[1],),
                     )
                     interval = pm.Gamma(
-                        "interval", alpha * Z, beta * Y, observed=self.data
+                        "interval", 1 / (alpha * Z), 1 / (beta * Y), observed=self.data
                     )
 
             case "Lognormal":
                 with self.model:
-                    mu = pm.Normal("mu", mu=0, sigma=100)
+                    mu = pm.HalfNormal("mu", sigma=100)
                     sigma = pm.HalfStudentT("sigma", nu=3, sigma=5)
                     sigmaZ = pm.HalfStudentT("sigmaZ", nu=3, sigma=5)
                     sigmaY = pm.HalfStudentT("sigmaY", nu=3, sigma=5)
-                    Z = pm.Normal("Z", mu=0, sigma=sigmaZ, shape=(self.data.shape[1],))
+                    Z = pm.HalfNormal("Z", sigma=sigmaZ, shape=(self.data.shape[1],))
                     Y = pm.Gamma(
                         "Y",
                         alpha=1 / sigmaY**2,
-                        beta=1 / sigmaZ**2,
+                        beta=1 / sigmaY**2,
                         shape=(self.data.shape[1],),
                     )
                     interval = pm.LogNormal(
-                        "interval", mu=Z + mu, sigma=Y * sigma, observed=self.data
+                        "interval", mu=Z + mu, tau=1 / (Y * sigma), observed=self.data
                     )
 
             case "Weibull":
@@ -138,8 +104,8 @@ class EQmodel:
                     )
                     interval = pm.Weibull(
                         "interval",
-                        alpha=Z * alpha,
-                        beta=Y * beta,
+                        alpha=1 / (Z * alpha),
+                        beta=1 / (Y * beta),
                         observed=self.data,
                     )
 
@@ -164,7 +130,7 @@ class EQmodel:
                     interval = pm.Wald(
                         "interval",
                         mu=1 / (Z * mu),
-                        phi=Y * alpha,
+                        lam=Y * alpha,
                         observed=self.data,
                     )
 
@@ -195,28 +161,25 @@ class EQmodel:
         with self.model:
             pm.sample_posterior_predictive(self.idata, **parameters)
 
-    def save(self, name, path=results_path):
-        self.idata.to_netcdf(results_path + self.dist + "-" + name + ".nc")
+    def save(self, name, path):
+        self.idata.to_netcdf(
+            path + self.dist + "-" + name + ".nc", overwrite_existing=True
+        )
 
 
-poi_model = EQmodel(
-    data=EQdata[0].T,
-    data_censor=EQdata_censor[0].T,
-    dist="Poisson",
-    censored=True,
-)
-poi_model.sample(MCMC_param["sample"])
-poi_model.sample_posterior_predictive(MCMC_param["sample_posterior_predictive"])
+# %% construct model to fit
+def forecast(i, dist, parameters, data, data_censor=None, verbose=True):
 
-print(az.summary(poi_model.idata.predictions))
-# poi_model.save(name="1")
+    if verbose:
+        print("Processing data %s!" % (i + 1))
 
-# %% check convergence
-# az.plot_trace(idata)
-# az.summary(idata)
-# az.loo(idata)
-# az.waic(idata)
+    model = EQmodel(data=data, data_censor=data_censor, dist=dist, censored=False)
+    model.sample(parameters["sample"])
+    model.sample_posterior_predictive(parameters["sample_posterior_predictive"])
+    model.save(name=str(i + 1), path=results_path)
 
-# %% predict variable interval
-# with Poisson_Model:
-#     pm.sample_posterior_predictive(idata,extend_inferencedata=True)
+    # print(az.summary(model.idata.predictions))
+
+    # # check convergence
+    # az.plot_trace(model.idata)
+    # az.summary(model.idata)
