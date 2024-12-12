@@ -10,16 +10,16 @@ from multiprocessing import Pool
 MCMC_param = dict(
     sample=dict(
         tune=20000,
-        draws=10000,
+        draws=50000,
         chains=4,
         cores=1,
-        random_seed=10001,
+        random_seed=123,
         idata_kwargs={"log_likelihood": True},
     ),
     sample_posterior_predictive=dict(
         extend_inferencedata=True,
         predictions=True,
-        random_seed=10001,
+        random_seed=123,
     ),
 )
 
@@ -35,6 +35,7 @@ EQdata_origin = [
     np.loadtxt(dm, delimiter=",", max_rows=EQdata_param["mc"]) for dm in EQdata_name
 ]
 EQdata = [np.diff(data) for data in EQdata_origin]
+EQdata_loo = [data[:, 0:-1] for data in EQdata]
 EQdata_censor = [censor_year - data[:, -1] for data in EQdata_origin]
 
 # %% define parallel function
@@ -45,7 +46,8 @@ def fore(i):
         i,
         dist="Wald",
         parameters=MCMC_param,
-        data=EQdata[i].T,
+        data=EQdata_loo[i].T,
+        censored=False,
         data_censor=EQdata_censor[i].T,
     )
 

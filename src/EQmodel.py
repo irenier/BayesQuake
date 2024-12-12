@@ -5,7 +5,7 @@ import pymc as pm
 import pytensor.tensor as pt
 
 # %% create directory to save results
-results_path = "results/"
+results_path = "retro_results/"
 if not os.path.exists(results_path):
     os.makedirs(results_path)
 
@@ -41,9 +41,7 @@ class EQmodel:
                         beta=1 / sigmaZ**2,
                         shape=(self.data.shape[1],),
                     )
-                    interval = pm.Exponential(
-                        "interval", 1 / (lam * Z), observed=self.data
-                    )
+                    interval = pm.Exponential("interval", lam * Z, observed=self.data)
 
             case "Gamma":
                 with self.model:
@@ -64,16 +62,16 @@ class EQmodel:
                         shape=(self.data.shape[1],),
                     )
                     interval = pm.Gamma(
-                        "interval", 1 / (alpha * Z), 1 / (beta * Y), observed=self.data
+                        "interval", alpha * Z, beta * Y, observed=self.data
                     )
 
             case "Lognormal":
                 with self.model:
-                    mu = pm.HalfNormal("mu", sigma=100)
+                    mu = pm.Normal("mu", mu=0, sigma=100)
                     sigma = pm.HalfStudentT("sigma", nu=3, sigma=5)
                     sigmaZ = pm.HalfStudentT("sigmaZ", nu=3, sigma=5)
                     sigmaY = pm.HalfStudentT("sigmaY", nu=3, sigma=5)
-                    Z = pm.HalfNormal("Z", sigma=sigmaZ, shape=(self.data.shape[1],))
+                    Z = pm.Normal("Z", mu=0, sigma=sigmaZ, shape=(self.data.shape[1],))
                     Y = pm.Gamma(
                         "Y",
                         alpha=1 / sigmaY**2,
@@ -81,7 +79,7 @@ class EQmodel:
                         shape=(self.data.shape[1],),
                     )
                     interval = pm.LogNormal(
-                        "interval", mu=Z + mu, tau=1 / (Y * sigma), observed=self.data
+                        "interval", mu=Z + mu, sigma=Y * sigma, observed=self.data
                     )
 
             case "Weibull":
@@ -104,8 +102,8 @@ class EQmodel:
                     )
                     interval = pm.Weibull(
                         "interval",
-                        alpha=1 / (Z * alpha),
-                        beta=1 / (Y * beta),
+                        alpha=Z * alpha,
+                        beta=Y * beta,
                         observed=self.data,
                     )
 
@@ -129,8 +127,8 @@ class EQmodel:
                     )
                     interval = pm.Wald(
                         "interval",
-                        mu=1 / (Z * mu),
-                        lam=Y * alpha,
+                        mu=Z * mu,
+                        lam=Z * mu / (Y * alpha) ** 2,
                         observed=self.data,
                     )
 
@@ -168,12 +166,12 @@ class EQmodel:
 
 
 # %% construct model to fit
-def forecast(i, dist, parameters, data, data_censor=None, verbose=True):
+def forecast(i, dist, parameters, data, censored=False, data_censor=None, verbose=True):
 
     if verbose:
         print("Processing data %s!" % (i + 1))
 
-    model = EQmodel(data=data, data_censor=data_censor, dist=dist, censored=False)
+    model = EQmodel(data=data, data_censor=data_censor, dist=dist, censored=censored)
     model.sample(parameters["sample"])
     model.sample_posterior_predictive(parameters["sample_posterior_predictive"])
     model.save(name=str(i + 1), path=results_path)
