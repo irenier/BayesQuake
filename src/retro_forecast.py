@@ -1,4 +1,5 @@
 import numpy as np
+from scipy import stats
 import arviz as az
 import pandas as pd
 import pickle
@@ -8,10 +9,8 @@ from multiprocessing import Pool
 # %% load data
 EQdata_path = "data/chronologies_all_final"
 EQdata_name = [os.path.join(EQdata_path, name) for name in os.listdir(EQdata_path)]
+EQdata_name.sort()
 EQdata_param = dict(mc=100)
-
-with open("data/EQname.pkl", "wb") as f:
-    pickle.dump(EQdata_name, f)
 
 EQdata_origin = [
     np.loadtxt(dm, delimiter=",", max_rows=EQdata_param["mc"]) for dm in EQdata_name
@@ -22,6 +21,7 @@ EQdata_loo = [data[:, 0:-1] for data in EQdata]
 # %% specify parameters
 
 results_path = "./retro_results/"
+mc_path = results_path + "mc/"
 summary_path = results_path + "summary/"
 
 if not os.path.exists(summary_path):
@@ -30,7 +30,6 @@ if not os.path.exists(summary_path):
 dist_name = ["Poisson", "Gamma", "Lognormal", "Weibull", "Wald"]
 quantile_alpha = 0.05
 quantile_CI = [quantile_alpha / 2, 1 - quantile_alpha / 2]
-weight_exp_beta = 1.0
 
 
 def summary(i):
@@ -39,7 +38,7 @@ def summary(i):
     pred = list()
     for j in range(5):
         dist_name_j = dist_name[j]
-        file_name = results_path + dist_name_j + "-" + str(i + 1) + ".nc"
+        file_name = mc_path + dist_name_j + "-" + str(i + 1) + ".nc"
         model = az.from_netcdf(file_name)
         res_compare[dist_name_j] = model
         pred.append(np.array(model.predictions.interval))
@@ -51,7 +50,7 @@ def summary(i):
             loo=az.loo(model).elpd_loo,
         )
 
-    pred_calc = np.array(pred)
+    pred = np.array(pred)
 
     res_df = pd.DataFrame.from_dict(res_model, orient="index")
     res_df["weight_waic"] = np.exp(res_df.waic - np.max(res_df.waic)) / np.sum(
@@ -60,8 +59,8 @@ def summary(i):
     res_df["weight_loo"] = az.compare(res_compare).weight
 
     MA_pred = dict(
-        MA_waic=np.einsum("a,abcde->bcde", np.array(res_df["weight_waic"]), pred_calc),
-        MA_loo=np.einsum("a,abcde->bcde", np.array(res_df["weight_loo"]), pred_calc),
+        MA_waic=np.einsum("a,abcde->bcde", np.array(res_df["weight_waic"]), pred),
+        MA_loo=np.einsum("a,abcde->bcde", np.array(res_df["weight_loo"]), pred),
     )
 
     MA_model = dict()

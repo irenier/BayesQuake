@@ -2,6 +2,7 @@ import numpy as np
 import pickle
 import pandas as pd
 import matplotlib
+import os
 
 matplotlib.use("pdf")
 import matplotlib.pyplot as plt
@@ -10,9 +11,14 @@ import matplotlib.lines as mlines
 # %% load data
 results_path = "./retro_results/"
 summary_path = results_path + "summary/"
+figures_path = results_path + "figures/"
 
-with open("data/EQname.pkl", "rb") as f:
-    EQdata_name = pickle.load(f)
+if not os.path.exists(figures_path):
+    os.makedirs(figures_path)
+
+EQdata_path = "data/chronologies_all_final"
+EQdata_name = [os.path.join(EQdata_path, name) for name in os.listdir(EQdata_path)]
+EQdata_name.sort()
 EQdata_param = dict(mc=100)
 
 EQdata_origin = [
@@ -32,14 +38,14 @@ tol_wd = 0.4
 mse = np.zeros((len(model_name),))
 recall = np.zeros((len(model_name),))
 
-# %% plot
+# %% plot retrospective CI
 fig, ax = plt.subplots(figsize=(40, 10))
-ax.set_yscale("symlog")
+ax.set_yscale("symlog", linthresh=5e2, linscale=1.5)
 ax.set_xticks(np.arange(1, N + 1) + tol_wd / 2)
 ax.set_xticklabels([str(i) for i in np.arange(1, N + 1)])
 ax.set_xlabel("fault")
 ax.set_ylabel("year")
-ax.set_ylim(-1e6, 1e7)
+ax.set_ylim(-1e7, 1e8)
 
 for i in range(N):
     with open(summary_path + str(i + 1) + ".pkl", "rb") as f:
@@ -80,12 +86,16 @@ mypatch = [
 ]
 # mypatch = mypatch.append(ax.scatter([], [], color="black", label="mean"))
 ax.legend(handles=mypatch)
-fig.savefig("retro_forecast.pdf")
+fig.savefig(figures_path + "retro_forecast.pdf")
 
-mse = np.sqrt(mse / N)
-
+mse = mse / N
+rmse = np.sqrt(mse)
+nrmse = rmse / np.mean(np.array(EQdata_last))
 
 data = pd.DataFrame(
-    index=model_name, columns=["MSE", "Recall"], data=np.array([mse, recall]).T
+    index=model_name,
+    columns=["MSE", "RMSE", "NRMSE", "Recall", "Recall rate"],
+    data=np.array([mse, rmse, nrmse, recall, recall / N]).T,
 )
+
 data.to_csv(results_path + "mse_recall.csv")

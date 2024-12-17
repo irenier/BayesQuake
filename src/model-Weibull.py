@@ -10,10 +10,12 @@ from multiprocessing import Pool
 MCMC_param = dict(
     sample=dict(
         tune=20000,
-        draws=50000,
+        draws=10000,
         chains=4,
         cores=1,
         random_seed=123,
+        # target_accept=0.9,
+        nuts_sampler="pymc",
         idata_kwargs={"log_likelihood": True},
     ),
     sample_posterior_predictive=dict(
@@ -27,6 +29,7 @@ MCMC_param = dict(
 # %% import data
 EQdata_path = "data/chronologies_all_final"
 EQdata_name = [os.path.join(EQdata_path, name) for name in os.listdir(EQdata_path)]
+EQdata_name.sort()
 EQdata_param = dict(mc=100)
 
 # %% transform data to interval
